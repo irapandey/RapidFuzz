@@ -6,6 +6,12 @@ on:
       - published
 
   workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Test mode - skip artifact upload and deployment'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build_sdist:
@@ -49,6 +55,7 @@ jobs:
           tools/seg_wrapper.sh pytest tests
 
       - uses: actions/upload-artifact@v7
+        if: ${{ !inputs.test_mode }}
         with:
           name: artifact-sdist
           path: dist/*.tar.gz
@@ -121,6 +128,7 @@ jobs:
           output-dir: wheelhouse
 
       - uses: actions/upload-artifact@v7
+        if: ${{ !inputs.test_mode }}
         with:
           name: artifact-${{ matrix.os }}-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
@@ -150,6 +158,7 @@ jobs:
           output-dir: wheelhouse
 
       - name: Upload wheels
+        if: ${{ !inputs.test_mode }}
         uses: actions/upload-artifact@v7
         with:
           name: pyodide-wheel
@@ -157,7 +166,7 @@ jobs:
 
 
   deploy-wheels:
-    if: github.event_name == 'release' && github.event.action == 'published'
+    if: github.event_name == 'release' && github.event.action == 'published' && !inputs.test_mode
     needs: [build_wheels]
     name: deploy wheels to pypi
     runs-on: ubuntu-latest
