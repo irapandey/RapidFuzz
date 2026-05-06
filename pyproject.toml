@@ -186,3 +186,5 @@ enable = ["cpython-freethreading", "pypy"]
 # wheels for all target platforms
 test-requires = ["pytest", "hypothesis"]
 test-command = "pytest {package}/tests"
+# Skip Python 3.14 on ppc64le and s390x where it's not yet available
+skip = ["cp314-*_ppc64le", "cp314-*_s390x"]
