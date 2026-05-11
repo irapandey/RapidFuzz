@@ -8,53 +8,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  build_all:
-    name: Build sdist and wheels for ${{ matrix.os }}
-    runs-on: ${{ matrix.runs-on }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # - os: linux-intel
-          #   runs-on: ubuntu-latest
-          # - os: linux-arm
-          #   runs-on: ubuntu-24.04-arm
-          # - os: linux-riscv64
-          #   runs-on: ubuntu-24.04-riscv
-          #   archs: riscv64
-          # - os: linux-s390x
-          #   runs-on: ubuntu-24.04-s390x
-          #   archs: s390x
-          - os: linux-ppc64le
-            runs-on: ubuntu-24.04-ppc64le
-            archs: ppc64le
-          # - os: windows-intel
-          #   runs-on: windows-latest
-          # - os: windows-arm
-          #   runs-on: windows-11-arm
-          # - os: macos-intel
-          #   # macos-15-intel is the last x86_64 runner
-          #   runs-on: macos-15-intel
-          # - os: macos-arm
-          #   # macos-14+ (including latest) are ARM64 runners
-          #   runs-on: macos-latest
-          #- os: android-intel
-          #  runs-on: ubuntu-latest
-          #  platform: android
-          #- os: android-arm
-          #  # GitHub Actions doesn't currently support the Android emulator on any ARM
-          #  # runner. So we build on a non-ARM runner, which will skip the tests.
-          #  runs-on: ubuntu-latest
-          #  platform: android
-          #  archs: arm64_v8a
-          #- os: ios
-          #  runs-on: macos-latest
-          #  platform: ios
-          # no official wheel support on pypi
-          #- os: pyodide
-          #  runs-on: ubuntu-latest
-          #  platform: pyodide
-
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
@@ -92,11 +48,76 @@ jobs:
         run: |
           tools/seg_wrapper.sh pytest tests
 
-      - name: Copy sdist for wheel building
+      - uses: actions/upload-artifact@v7
+        with:
+          name: artifact-sdist
+          path: dist/*.tar.gz
+
+  build_wheels:
+    name: Build wheel for ${{ matrix.os }}
+    needs: [build_sdist]
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # - os: linux-intel
+          #   runs-on: ubuntu-latest
+          # - os: linux-arm
+          #   runs-on: ubuntu-24.04-arm
+          # - os: linux-riscv64
+          #   runs-on: ubuntu-24.04-riscv
+          #   archs: riscv64
+          # - os: linux-s390x
+          #   runs-on: ubuntu-24.04-s390x
+          #   archs: s390x
+          - os: linux-ppc64le
+            runs-on: self-hosted
+            archs: ppc64le
+          # - os: windows-intel
+          #   runs-on: windows-latest
+          # - os: windows-arm
+          #   runs-on: windows-11-arm
+          # - os: macos-intel
+          #   # macos-15-intel is the last x86_64 runner
+          #   runs-on: macos-15-intel
+          # - os: macos-arm
+          #   # macos-14+ (including latest) are ARM64 runners
+          #   runs-on: macos-latest
+          #- os: android-intel
+          #  runs-on: ubuntu-latest
+          #  platform: android
+          #- os: android-arm
+          #  # GitHub Actions doesn't currently support the Android emulator on any ARM
+          #  # runner. So we build on a non-ARM runner, which will skip the tests.
+          #  runs-on: ubuntu-latest
+          #  platform: android
+          #  archs: arm64_v8a
+          #- os: ios
+          #  runs-on: macos-latest
+          #  platform: ios
+          # no official wheel support on pypi
+          #- os: pyodide
+          #  runs-on: ubuntu-latest
+          #  platform: pyodide
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: artifact-sdist
+          path: dist
+
+      - name: Copy wheel
         shell: bash
         run: cp dist/*.tar.gz rapidfuzz.tar.gz
 
+      - uses: IBM/setup-python-pz@291287e36d7c893a50c857d8bc014d67edd58ada
+        if: matrix.archs == 'ppc64le' || matrix.archs == 's390x'
+        with:
+          python-version: '3.11'
+
       - name: Build wheels
+        if: matrix.archs != 'ppc64le' && matrix.archs != 's390x'
         uses: pypa/cibuildwheel@v3.4.1
         env:
           CIBW_PLATFORM: ${{ matrix.platform || 'auto' }}
@@ -104,41 +125,64 @@ jobs:
         with:
           package-dir: rapidfuzz.tar.gz
           output-dir: wheelhouse
+      
+      - name: Build Wheel (ppc64le and s390x)
+        if: matrix.archs == 'ppc64le' || matrix.archs =='s390x'
+        env:
+          CIBW_PLATFORM: linux
+          CIBW_ARCHS: ${{ matrix.archs }}
+        run: |
+          python -m pip install cibuildwheel==3.4.1
+          python -m cibuildwheel --output-dir wheelhouse rapidfuzz.tar.gz
 
-      # - uses: actions/upload-artifact@v7
-      #   with:
-      #     name: artifact-${{ matrix.os }}-${{ strategy.job-index }}
-      #     path: ./wheelhouse/*.whl
+      - uses: actions/upload-artifact@v7
+        with:
+          name: artifact-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
 
-  # build_wheels_pyodide:
-  #   name: Build wheels on ubuntu-latest/pyodide
-  #   needs: [build_sdist]
-  #   runs-on: ubuntu-latest
+  build_wheels_pyodide:
+    name: Build wheels on ubuntu-latest/pyodide
+    needs: [build_sdist]
+    runs-on: ubuntu-latest
 
-  #   steps:
-  #     - uses: actions/download-artifact@v8
-  #       with:
-  #         name: artifact-sdist
-  #         path: dist
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: artifact-sdist
+          path: dist
 
-  #     - name: Copy wheel
-  #       run: cp dist/*.tar.gz rapidfuzz.tar.gz
+      - name: Copy wheel
+        run: cp dist/*.tar.gz rapidfuzz.tar.gz
+      
+      - uses: IBM/setup-python-pz@291287e36d7c893a50c857d8bc014d67edd58ada
+        if: matrix.archs == 'ppc64le' || matrix.archs == 's390x'
+        with:
+          python-version: '3.11'
 
-  #     - name: Build wheels
-  #       if: matrix.archs != 'riscv64'
-  #       uses: pypa/cibuildwheel@v3.4.1
-  #       env:
-  #         CIBW_PLATFORM: pyodide
-  #         CIBW_ARCHS: auto
-  #       with:
-  #         package-dir: rapidfuzz.tar.gz
-  #         output-dir: wheelhouse
+      - name: Build wheels
+        if: matrix.archs != 'riscv64' && matrix.archs != 'ppc64le' && matrix.archs != 's390x'
+        uses: pypa/cibuildwheel@v3.4.1
+        env:
+          CIBW_PLATFORM: pyodide
+          CIBW_ARCHS: auto
+        with:
+          package-dir: rapidfuzz.tar.gz
+          output-dir: wheelhouse
+      
+      - name: Build Wheel (ppc64le and s390x)
+        if: matrix.archs == 'ppc64le' || matrix.archs =='s390x'
+        env:
+          CIBW_PLATFORM: linux
+          CIBW_ARCHS: ${{ matrix.archs }}
+        run: |
+          python -m pip install cibuildwheel==3.4.1
+          python -m cibuildwheel --output-dir wheelhouse rapidfuzz.tar.gz
 
-  #     - name: Upload wheels
-  #       uses: actions/upload-artifact@v7
-  #       with:
-  #         name: pyodide-wheel
-  #         path: ./wheelhouse/*.whl
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: pyodide-wheel
+          path: ./wheelhouse/*.whl
 
 
   # deploy-wheels:
